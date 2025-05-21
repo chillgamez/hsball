@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HS Basketball Dynasty</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #222; color: #eee; margin: 0; padding: 0; }
+  h1, h2 { text-align: center; }
+  #container { max-width: 900px; margin: auto; padding: 20px; }
+  #roster, #recruits, #depthChart, #socialFeed { background: #333; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+  button { background: #ff6600; color: white; border: none; padding: 8px 12px; margin: 5px 0; cursor: pointer; border-radius: 4px; }
+  button:hover { background: #e55b00; }
+  select { padding: 6px; margin-top: 5px; width: 100%; border-radius: 4px; }
+  .player-card { border-bottom: 1px solid #555; padding: 6px 0; }
+  .player-name { font-weight: bold; }
+  #socialFeed { max-height: 200px; overflow-y: auto; font-size: 0.9em; }
+  .social-post { border-bottom: 1px solid #555; padding: 4px 0; }
+  label { font-weight: bold; display: block; margin-top: 10px; }
+  .depth-select { margin: 5px 0 15px 0; width: 100%; }
+  #playerStatsSection { background: #444; padding: 10px; border-radius: 6px; margin-top: 10px; }
+  #seasonControls { text-align: center; margin-bottom: 15px; }
+</style>
+</head>
+<body>
+<div id="container">
+  <h1>HS Basketball Dynasty</h1>
+  <div id="seasonControls">
+    <button id="trainButton">Train Players (Team-wide)</button>
+    <button id="advanceSeasonButton">Advance Season</button>
+    <p>Season Year: <span id="seasonYear"></span></p>
+  </div>
+
+  <section id="depthChart">
+    <h2>Depth Chart Starters</h2>
+    <label for="PGSelect">Point Guard (PG):</label>
+    <select id="PGSelect" class="depth-select"></select>
+    <label for="SGSelect">Shooting Guard (SG):</label>
+    <select id="SGSelect" class="depth-select"></select>
+    <label for="SFSelect">Small Forward (SF):</label>
+    <select id="SFSelect" class="depth-select"></select>
+    <label for="PFSelect">Power Forward (PF):</label>
+    <select id="PFSelect" class="depth-select"></select>
+    <label for="CSelect">Center (C):</label>
+    <select id="CSelect" class="depth-select"></select>
+  </section>
+
+  <section id="roster">
+    <h2>Your Team Roster</h2>
+    <div id="rosterList"></div>
+  </section>
+
+  <section id="recruits">
+    <h2>Recruits</h2>
+    <div id="recruitsList"></div>
+  </section>
+
+  <section id="playerStats">
+    <h2>Player Stats & NCAA Offers</h2>
+    <select id="playerSelect"><option value="">-- Select Player --</option></select>
+    <div id="playerStatsSection"></div>
+  </section>
+
+  <section id="socialFeed">
+    <h2>Social Media Feed</h2>
+  </section>
+</div>
+
+<script>
+(() => {
+  const positions = ["PG", "SG", "SF", "PF", "C"];
+  const TRAIN_COOLDOWN_SEASONS = 1;
+
+  let seasonYear = 2025;
+  let trainCooldown = 0;
+
+  // Player template generator
+  function createPlayer(name, position, grade, overall) {
+    return {
+      name,
+      position,
+      grade,
+      overall,
+      stats: { gp: 0, pts: 0, reb: 0, ast: 0 },
+      offers: [],
+      recruited: false,
+      canPlay: grade >= 9,
+      trainedLastSeason: false
+    };
+  }
+
+  // Sample names for random generation
+  const firstNames = ["Jalen", "Tyler", "Marcus", "Derek", "Austin", "Cameron", "Malik", "Jordan", "Trey", "Devon"];
+  const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis", "Garcia", "Rodriguez", "Wilson"];
+
+  // Utility: random int inclusive
+  function randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  // Utility: pick random from array
+  function randomChoice(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  // Generate random player name
+  function generateName() {
+    return `${randomChoice(firstNames)} ${randomChoice(lastNames)}`;
+  }
+
+  // More realistic rating generator based on grade and position
+  function realisticRating(grade) {
+    /*
+    Typical HS Basketball Ratings Scale:
+    9th Grade (Freshman): 40-65 overall
+    10th Grade (Sophomore): 50-75 overall
+    11th Grade (Junior): 60-85 overall
+    12th Grade (Senior): 65-90 overall
+    Plus some randomness and variation.
+    */
+    let baseMin, baseMax;
+    switch(grade) {
+      case 9: baseMin = 40; baseMax = 65; break;
+      case 10: baseMin = 50; baseMax = 75; break;
+      case 11: baseMin = 60; baseMax = 85; break;
+      case 12: baseMin = 65; baseMax = 90; break;
+      default: baseMin = 40; baseMax = 65;
+    }
+    return randomInt(baseMin, baseMax);
+  }
+
+  // Simulate season stats based on overall and grade
+  function simulateStats(player) {
+    // Games played 15 to 30
+    const gp = randomInt(15, 30);
+    player.stats.gp = gp;
+    // Points per game roughly scales with overall, with natural variance
+    const ppg = Math.max(3, Math.min(30, (player.overall * 0.35) + randomInt(-5,5)));
+    const rpg = Math.max(1, Math.min(12, (player.overall * 0.15) + randomInt(-3,3)));
+    const apg = Math.max(1, Math.min(10, (player.overall * 0.12) + randomInt(-3,3)));
+    player.stats.pts = Math.round(ppg * gp);
+    player.stats.reb = Math.round(rpg * gp);
+    player.stats.ast = Math.round(apg * gp);
+  }
+
+  // Assign offers based on overall rating (more realistic)
+  function assignOffers(player) {
+    player.offers = [];
+    if(player.overall >= 85) {
+      player.offers.push("Duke", "Kentucky", "Kansas");
+    } else if(player.overall >= 75) {
+      player.offers.push("UCLA", "Florida", "Villanova");
+    } else if(player.overall >= 65) {
+      player.offers.push("Arizona State", "Oregon", "Texas Tech");
+    } else if(player.overall >= 50) {
+      player.offers.push("Mid-major College", "Local University");
+    }
+  }
+
+  // Generate initial team (random)
+  let team = [];
+  function initializeTeam() {
+    team = [];
+    // create 2 players per position per grade 9-12 (about 40 players)
+    for(let grade = 9; grade <= 12; grade++) {
+      for(let pos of positions) {
+        for(let i=0; i<2; i++) {
+          const name = generateName();
+          const overall = realisticRating(grade);
+          const player = createPlayer(name, pos, grade, overall);
+          simulateStats(player);
+          assignOffers(player);
+          team.push(player);
+        }
+      }
+    }
+  }
+
+  // recruits list
+let recruits = [];
+// Generate new recruits (grades 6-12 with realistic rankings and position state ranking)
+function generateRecruits() {
+  recruits = [];
+  const numRecruits = randomInt(6, 12);
+  for (let i = 0; i < numRecruits; i++) {
+    const grade = randomInt(6, 12);
+    const pos = randomChoice(positions);
+    const name = generateName();
+    const overall = realisticRating(grade);
+    const player = createPlayer(name, pos, grade, overall);
+    simulateStats(player);
+    assignOffers(player);
+    // Add a realistic state ranking for recruit
+    player.stateRank = randomInt(1, 100);
+    recruits.push(player);
+  }
+}
+
+// Render roster players
+function renderRoster() {
+  const rosterDiv = document.getElementById("rosterList");
+  rosterDiv.innerHTML = "";
+  team.sort((a,b) => b.overall - a.overall);
+  team.forEach((player, i) => {
+    const div = document.createElement("div");
+    div.className = "player-card";
+    div.innerHTML = `<span class="player-name">${player.name}</span> (${player.position}) Grade: ${player.grade} Overall: ${player.overall}<br>
+    Stats: PPG ${(player.stats.pts / player.stats.gp).toFixed(1)}, RPG ${(player.stats.reb / player.stats.gp).toFixed(1)}, APG ${(player.stats.ast / player.stats.gp).toFixed(1)}<br>
+    NCAA Offers: ${player.offers.length > 0 ? player.offers.join(", ") : "None"} ${player.grade === 12 ? ` | NBA Projection: ${nbaProjection(player)}` : ""}`;
+    rosterDiv.appendChild(div);
+  });
+}
+
+// Render recruits
+function renderRecruits() {
+  const recruitsDiv = document.getElementById("recruitsList");
+  recruitsDiv.innerHTML = "";
+  recruits.sort((a,b) => a.stateRank - b.stateRank);
+  recruits.forEach((player, i) => {
+    const div = document.createElement("div");
+    div.className = "player-card";
+    const eligibleText = player.grade >= 9 ? "" : "(Ineligible until HS)";
+    div.innerHTML = `<span class="player-name">${player.name}</span> (${player.position}) Grade: ${player.grade} Overall: ${player.overall} State Rank: #${player.stateRank} ${eligibleText}<br>
+    Stats: PPG ${(player.stats.pts / player.stats.gp).toFixed(1)}, RPG ${(player.stats.reb / player.stats.gp).toFixed(1)}, APG ${(player.stats.ast / player.stats.gp).toFixed(1)}<br>
+    NCAA Offers: ${player.offers.length > 0 ? player.offers.join(", ") : "None"}<br>
+    <button onclick="recruitPlayer(${i})" ${player.grade < 9 ? 'disabled title="Cannot recruit middle school players yet"' : ''}>Recruit Player</button>`;
+    recruitsDiv.appendChild(div);
+  });
+}
+
+// Recruit player from recruits to team
+function recruitPlayer(index) {
+  const player = recruits[index];
+  if (player.grade < 9) {
+    alert("Cannot recruit middle school players yet.");
+    return;
+  }
+  if (team.length >= 40) {
+    alert("Roster full! Graduate players to add more.");
+    return;
+  }
+  player.recruited = true;
+  team.push(player);
+  recruits.splice(index, 1);
+  updateAll();
+}
+
+// Update all UI components and selections
+function updateAll() {
+  renderRoster();
+  renderRecruits();
+  updateDepthChart();
+  updatePlayerSelect();
+  document.getElementById("seasonYear").textContent = seasonYear;
+}
+
+// Update depth chart dropdowns
+function updateDepthChart() {
+  positions.forEach(pos => {
+    const select = document.getElementById(pos + "Select");
+    // Clear options
+    select.innerHTML = "";
+    // Filter players by position
+    const eligiblePlayers = team.filter(p => p.position === pos && p.canPlay);
+    eligiblePlayers.sort((a,b) => b.overall - a.overall);
+    eligiblePlayers.forEach((player, idx) => {
+      const option = document.createElement("option");
+      option.value = player.name;
+      option.text = `${player.name} (Grade ${player.grade}) - OVR ${player.overall}`;
+      select.appendChild(option);
+    });
+  });
+}
+
+// Update player select dropdown for stats view
+function updatePlayerSelect() {
+  const select = document.getElementById("playerSelect");
+  select.innerHTML = `<option value="">-- Select Player --</option>`;
+  const sortedTeam = [...team].sort((a,b) => b.overall - a.overall);
+  sortedTeam.forEach(p => {
+    const option = document.createElement("option");
+    option.value = p.name;
+    option.text = `${p.name} (${p.position}) Grade ${p.grade} OVR ${p.overall}`;
+    select.appendChild(option);
+  });
+}
+
+// Show selected player stats
+function updateStatsPlayerSelect() {
+  const select = document.getElementById("playerSelect");
+  const statsDiv = document.getElementById("playerStatsSection");
+  select.onchange = () => {
+    const playerName = select.value;
+    if (!playerName) {
+      statsDiv.innerHTML = "<i>Select a player to view stats and info.</i>";
+      return;
+    }
+    const player = team.find(p => p.name === playerName);
+    if (!player) {
+      statsDiv.innerHTML = "Player not found.";
+      return;
+    }
+    const gp = player.stats.gp || 0;
+    const ppg = gp ? (player.stats.pts / gp).toFixed(1) : 0;
+    const rpg = gp ? (player.stats.reb / gp).toFixed(1) : 0;
+    const apg = gp ? (player.stats.ast / gp).toFixed(1) : 0;
+    statsDiv.innerHTML = `<b>${player.name}</b> - Grade: ${player.grade}, Position: ${player.position}<br>
+    Overall Rating: ${player.overall}<br>
+    Games Played: ${gp}<br>
+    Points Per Game: ${ppg}<br>
+    Rebounds Per Game: ${rpg}<br>
+    Assists Per Game: ${apg}<br>
+    NCAA Offers: ${player.offers.length > 0 ? player.offers.join(", ") : "None"}<br>
+    ${player.grade === 12 ? `<b>NBA Projection:</b> ${nbaProjection(player)}` : ""}
+    `;
+  };
+  select.dispatchEvent(new Event('change'));
+}
+
+// NBA draft projection based on overall and stats
+function nbaProjection(player) {
+  // Use overall and recent stats to project draft
+  const overall = player.overall;
+  if(player.grade < 12) return "Not Eligible";
+  if (overall >= 88) return "Top 5 Pick";
+  if (overall >= 80) return "Lottery Pick";
+  if (overall >= 70) return "First Round";
+  if (overall >= 60) return "Second Round";
+  return "Undrafted";
+}
+
+// Training players with cooldowns
+function trainPlayers() {
+  if (trainCooldown > 0) {
+    alert(`You must wait ${trainCooldown} season(s) before training again.`);
+    return;
+  }
+  team.forEach(player => {
+    // Players improve by 1-3 overall but capped realistically
+    if(player.grade < 12) {
+      const improvement = randomInt(1, 3);
+      player.overall = Math.min(player.overall + improvement, 90);
+      player.trainedLastSeason = true;
+    }
+  });
+  trainCooldown = TRAIN_COOLDOWN_SEASONS;
+  alert("Training complete! Player overalls improved.");
+  updateAll();
+}
+
+// Advance season: simulate stats, advance grades, generate new recruits
+function advanceSeason() {
+  // Simulate season stats for all players
+  team.forEach(player => {
+    simulateStats(player);
+  });
+  // Train cooldown decrement
+  if (trainCooldown > 0) trainCooldown--;
+
+  // Advance grades, graduate seniors
+  team = team.filter(player => {
+    if (player.grade >= 12) {
+      // For seniors, show graduation message and NCAA commitment
+      const ncaa = player.offers.length ? randomChoice(player.offers) : "No College";
+      postToSocialFeed(`${player.name} has graduated and committed to ${ncaa}!`);
+      return false; // remove graduated
+    }
+    player.grade++;
+    // Recalculate canPlay
+    player.canPlay = player.grade >= 9;
+    // Reset training flag for new season
+    player.trainedLastSeason = false;
+    // Update overall slightly on grade up (natural progression)
+    const naturalGrowth = randomInt(0, 2);
+    player.overall = Math.min(player.overall + naturalGrowth, 95);
+    assignOffers(player);
+    return true;
+  });
+
+  // Generate new recruits (grades 6-9 typically)
+  generateRecruits();
+
+  // Post season summary to feed
+  postToSocialFeed(`Season ${seasonYear} complete. Your team finished with ${team.length} players.`);
+
+  // Increment season year
+  seasonYear++;
+
+  updateAll();
+}
+
+// Post to social media feed (fake Twitter style)
+function postToSocialFeed(text) {
+  const feed = document.getElementById("socialFeed");
+  const post = document.createElement("div");
+  post.className = "social-post";
+  const timestamp = new Date().toLocaleDateString();
+  post.textContent = `[${timestamp}] @HSBasketballDynasty: ${text}`;
+  feed.prepend(post);
+}
+
+// Initialization
+function initializeGame() {
+  seasonYear = 2025;
+  trainCooldown = 0;
+  initializeTeam();
+  generateRecruits();
+  updateAll();
+  postToSocialFeed("Welcome to your HS Basketball Dynasty! Build your legacy!");
+}
+
+// Event listeners
+document.getElementById("trainButton").onclick = trainPlayers;
+document.getElementById("advanceSeasonButton").onclick = advanceSeason;
+
+positions.forEach(pos => {
+  const select = document.getElementById(pos + "Select");
+  select.onchange = () => {
+    // Could implement depth chart impact here
+  };
+});
+
+initializeGame();
+updateStatsPlayerSelect();
+
+window.recruitPlayer = recruitPlayer; // expose for button inline onclick
+})();
+</script>
+</body>
+</html>
+
